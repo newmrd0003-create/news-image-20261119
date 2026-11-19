@@ -1,82 +1,43 @@
 #!/usr/bin/env python3
-"""news-image-20261119 — front page of THE WORLD, Thursday 19 November 2026.
+"""THE WORLD -- front page for Thursday 19 November 2026.
 
-Six verified stories from 19 November 2026, drawn with PIL only.
-Deterministic: fixed seed, no network, no timestamps, no external images.
-Output: entry.png (1024x1024 RGB) next to this script.
+Draws entry.png (1024 x 1024) with Pillow only. No external images,
+no network, no randomness and no timestamps: the same input always
+produces the same output bytes.
 
-Stories (all reported 19 Nov 2026):
-1. Trump, Xi and Putin hold trilateral talks in Shenzhen during APEC.
-2. Grand Theft Auto VI begins its global rollout after a 13-year wait.
-3. Democrats nominate Hakeem Jeffries for Speaker — first Black Speaker.
-4. Cyclone Akvan intensifies in the Bay of Bengal; landfall due 20 Nov.
-5. NASA's Voyager 1 reaches one light-day from Earth.
-6. EU proposes a EUR 45bn loan for Ukraine, repaid from Russian reparations.
+Layout: dateline, masthead, one full-width lead story, then a
+two-column grid with the remaining five stories, and a footer rule.
 """
 
-import math
 import os
-import random
+
 from PIL import Image, ImageDraw, ImageFont
 
-W, H = 1024, 1024
-INK = (17, 17, 17)
-PAPER = (255, 255, 255)
-ACCENT = (139, 0, 0)
-SKY_TOP = (38, 84, 124)
-SKY_BOT = (122, 168, 205)
-SUN = (242, 183, 65)
-GREY = (90, 90, 90)
-RULE = (17, 17, 17)
+WIDTH, HEIGHT = 1024, 1024
+PAPER = (247, 243, 232)
+INK = (22, 22, 22)
 
-random.seed(20261119)
+SERIF = "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf"
+SERIF_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf"
+SANS = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+SANS_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
-SERIF_BLACK = "/usr/share/fonts/truetype/noto/NotoSerifDisplay-Black.ttf"
-SERIF_BOLD = "/usr/share/fonts/truetype/noto/NotoSerifDisplay-Bold.ttf"
-SERIF_REG = "/usr/share/fonts/truetype/noto/NotoSerifDisplay-Regular.ttf"
-SANS_REG = "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
-SANS_BOLD = "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"
-FALLBACK_SERIF = "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf"
-FALLBACK_SANS = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+MARGIN = 44
+CONTENT_RIGHT = WIDTH - MARGIN
+FIT_LIMIT = 976
 
 
-def load_font(preferred, fallback, size):
-    for path in (preferred, fallback):
-        if os.path.exists(path):
-            try:
-                return ImageFont.truetype(path, size)
-            except OSError:
-                continue
-    return ImageFont.load_default()
+def load(path, size):
+    return ImageFont.truetype(path, size)
 
 
-def serif_black(size):
-    return load_font(SERIF_BLACK, FALLBACK_SERIF, size)
-
-
-def serif_bold(size):
-    return load_font(SERIF_BOLD, FALLBACK_SERIF, size)
-
-
-def serif_reg(size):
-    return load_font(SERIF_REG, FALLBACK_SERIF, size)
-
-
-def sans(size):
-    return load_font(SANS_REG, FALLBACK_SANS, size)
-
-
-def sans_bold(size):
-    return load_font(SANS_BOLD, FALLBACK_SANS, size)
-
-
-def wrap_text(draw, text, font, max_width):
-    """Greedy word wrap by pixel width; returns a list of lines."""
-    words = text.split()
-    lines, current = [], ""
-    for word in words:
+def wrap(draw, text, font, width):
+    """Greedy word wrap measured with the real font; deterministic."""
+    lines = []
+    current = ""
+    for word in text.split():
         trial = word if not current else current + " " + word
-        if draw.textlength(trial, font=font) <= max_width:
+        if draw.textlength(trial, font=font) <= width:
             current = trial
         else:
             if current:
@@ -87,223 +48,190 @@ def wrap_text(draw, text, font, max_width):
     return lines
 
 
-def draw_centered(draw, cx, y, text, font, fill=INK):
-    w = draw.textlength(text, font=font)
-    draw.text((cx - w / 2, y), text, font=font, fill=fill)
-    return y + font.size + 4
+def draw_lines(draw, x, y, text, font, width, leading, align="left"):
+    """Draw wrapped text; return the y coordinate below the block."""
+    for line in wrap(draw, text, font, width):
+        if align == "center":
+            lx = x + (width - draw.textlength(line, font=font)) / 2.0
+        else:
+            lx = x
+        draw.text((lx, y), line, font=font, fill=INK)
+        y += leading
+    return y
 
 
-def draw_wrapped_centered(draw, cx, y, text, font, max_width, leading=None):
-    lines = wrap_text(draw, text, font, max_width)
-    step = leading if leading is not None else int(font.size * 1.28)
-    for line in lines:
-        draw_centered(draw, cx, y, line, font)
-        y += step
-    return y, lines
+def rule(draw, x0, x1, y, weight=2):
+    draw.line([(x0, y), (x1, y)], fill=INK, width=weight)
 
 
-def hrule(draw, x0, x1, y, width=2):
-    draw.line([(x0, y), (x1, y)], fill=RULE, width=width)
+def draw_kicker(draw, x, y, text, size=14):
+    font = load(SANS_BOLD, size)
+    draw.text((x, y), text, font=font, fill=INK)
+    return y + size + 6
 
 
-# ---------------------------------------------------------------- pictograms
-def pic_handshake(draw, cx, cy, s, color=INK):
-    """Two clasped hands over a globe arc: a summit handshake."""
-    draw.arc([cx - s, cy - s, cx + s, cy + s], start=200, end=340,
-             fill=color, width=3)
-    draw.line([(cx - s + 6, cy + 2), (cx - 6, cy - 12)], fill=color, width=3)
-    draw.line([(cx + s - 6, cy + 2), (cx + 6, cy - 12)], fill=color, width=3)
-    draw.line([(cx - 6, cy - 12), (cx + 6, cy - 12)], fill=color, width=3)
-    for dx in (-14, 0, 14):
-        draw.line([(cx + dx - 5, cy - 12), (cx + dx + 5, cy - 2)],
-                  fill=color, width=2)
-    draw.ellipse([cx - 4, cy - 18, cx + 4, cy - 10], fill=color)
+def draw_story(draw, x, y, width, kicker, headline, body,
+               head_size=26, body_size=16):
+    """One grid story: kicker, headline, standfirst. Returns bottom y."""
+    y = draw_kicker(draw, x, y, kicker)
+    head_font = load(SERIF_BOLD, head_size)
+    y = draw_lines(draw, x, y, headline, head_font, width, head_size + 7)
+    y += 4
+    body_font = load(SERIF, body_size)
+    y = draw_lines(draw, x, y, body, body_font, width, body_size + 4)
+    return y
 
 
-def pic_controller(draw, cx, cy, s, color=INK):
-    """Game controller: rounded body, d-pad, two buttons."""
-    draw.rounded_rectangle([cx - s, cy - s // 2, cx + s, cy + s // 2],
-                           radius=12, outline=color, width=3)
-    draw.line([(cx - s + 12, cy), (cx - s + 26, cy)], fill=color, width=3)
-    draw.line([(cx - s + 19, cy - 7), (cx - s + 19, cy + 7)], fill=color, width=3)
-    draw.ellipse([cx + s - 30, cy - 12, cx + s - 18, cy], fill=color)
-    draw.ellipse([cx + s - 16, cy + 2, cx + s - 4, cy + 14], fill=color)
+# --- Verified stories for 19 November 2026 (checked 19 Nov 2026) ---
+
+LEAD_KICKER = "APEC SUMMIT — SHENZHEN"
+LEAD_HEADLINE = "TRUMP, XI AND PUTIN IN FIRST TRILATERAL SUMMIT"
+LEAD_BODY = (
+    "The leaders of the United States, China and Russia meet in Shenzhen "
+    "on Thursday, on the sidelines of the APEC summit, for the first "
+    "three-way talks of their kind. Trump said he would raise nuclear "
+    "arms cuts, but no deal was expected."
+)
+
+GRID_STORIES_LEFT = [
+    (
+        "GAMES",
+        "GTA VI ROLLS OUT AFTER 13-YEAR WAIT",
+        "Grand Theft Auto VI launches at midnight on Thursday for "
+        "PlayStation 5 and Xbox Series X|S, returning players to Vice "
+        "City in Leonida.",
+    ),
+    (
+        "WASHINGTON",
+        "JEFFRIES NOMINATED FOR SPEAKER IN 251-11 VOTE",
+        "House Democrats nominated Hakeem Jeffries on Wednesday to be "
+        "Speaker, in a closed-door vote of 251 to 11. He would be the "
+        "first Black American to hold the gavel.",
+    ),
+]
+
+GRID_STORIES_RIGHT = [
+    (
+        "WEATHER — BAY OF BENGAL",
+        "CYCLONE AKVAN NEARS INDIA'S EAST COAST",
+        "Cyclone Akvan nears India's east coast. Landfall is due between "
+        "Narsapur and Puri by noon on Friday, with winds of 90–100 km/h "
+        "gusting to 110 km/h.",
+    ),
+    (
+        "SPACE",
+        "VOYAGER 1, A FULL LIGHT-DAY FROM HOME",
+        "Voyager 1 crossed one light-day from Earth on Wednesday — 25.9 "
+        "billion kilometres, a first for any human-made object. A radio "
+        "signal now takes 24 hours to reach it.",
+    ),
+    (
+        "BRUSSELS",
+        "EU PLANS €45BN LOAN FOR UKRAINE",
+        "Brussels proposed a €45bn loan to Ukraine on Wednesday, "
+        "covering two-thirds of Kyiv's €70bn gap. Kyiv repays only "
+        "once Russia pays reparations.",
+    ),
+]
 
 
-def pic_dome(draw, cx, cy, s, color=INK):
-    """Capitol dome: base, columns, cupola."""
-    draw.rectangle([cx - s, cy + s - 8, cx + s, cy + s], fill=color)
-    draw.rectangle([cx - s + 6, cy + s - 16, cx + s - 6, cy + s - 8], fill=color)
-    for dx in (-s + 12, -s // 2, 0, s // 2, s - 16):
-        draw.line([(cx + dx, cy - 2), (cx + dx, cy + s - 16)],
-                  fill=color, width=3)
-    draw.arc([cx - s + 10, cy - s - 2, cx + s - 10, cy + 8],
-             start=180, end=360, fill=color, width=3)
-    draw.line([(cx, cy - s - 10), (cx, cy - s + 2)], fill=color, width=3)
-    draw.ellipse([cx - 4, cy - s - 14, cx + 4, cy - s - 6], fill=color)
+def build():
+    img = Image.new("RGB", (WIDTH, HEIGHT), PAPER)
+    draw = ImageDraw.Draw(img)
 
+    # Outer frame.
+    draw.rectangle([14, 14, WIDTH - 15, HEIGHT - 15], outline=INK, width=3)
 
-def pic_spiral(draw, cx, cy, s, color=INK):
-    """Cyclone spiral: Archimedean spiral plus a calm eye."""
-    pts = []
-    turns = 2.6
-    steps = 120
-    for i in range(steps + 1):
-        t = turns * 2 * math.pi * i / steps
-        r = s * i / steps
-        pts.append((cx + r * math.cos(t), cy + r * math.sin(t)))
-    draw.line(pts, fill=color, width=3, joint="curve")
-    draw.ellipse([cx - 5, cy - 5, cx + 5, cy + 5], outline=color, width=2)
+    # Dateline row.
+    date_font = load(SANS_BOLD, 15)
+    draw.text((MARGIN, 30), "THURSDAY, 19 NOVEMBER 2026",
+              font=date_font, fill=INK)
+    issue = "No. 323"
+    draw.text((CONTENT_RIGHT - draw.textlength(issue, font=date_font), 30),
+              issue, font=date_font, fill=INK)
+    rule(draw, MARGIN, CONTENT_RIGHT, 56)
 
+    # Masthead.
+    mast_font = load(SERIF_BOLD, 96)
+    draw.text((WIDTH // 2, 62), "THE WORLD", font=mast_font, fill=INK,
+              anchor="ma")
+    tag_font = load(SANS, 14)
+    draw.text((WIDTH // 2, 158), "T H E   D A Y   I N   S I X   S T O R I E S",
+              font=tag_font, fill=INK, anchor="ma")
+    rule(draw, MARGIN, CONTENT_RIGHT, 184)
+    rule(draw, MARGIN, CONTENT_RIGHT, 189)
 
-def pic_signal(draw, cx, cy, s, color=INK):
-    """Deep-space probe: dish beaming a signal to a star."""
-    draw.ellipse([cx - s + 4, cy - s + 4, cx + s - 4, cy + s - 4],
-                 outline=color, width=3)
-    draw.line([(cx, cy + s - 6), (cx, cy - s + 14)], fill=color, width=3)
-    draw.line([(cx - 14, cy + 2), (cx + 14, cy + 2)], fill=color, width=2)
-    sx, sy = cx + s - 2, cy - s + 2
-    draw.ellipse([sx - 5, sy - 5, sx + 5, sy + 5], fill=SUN)
-    for ang in (0, 72, 144, 216, 288):
-        a = math.radians(ang)
-        draw.line([(sx, sy), (sx + 11 * math.cos(a), sy + 11 * math.sin(a))],
-                  fill=SUN, width=2)
+    # Lead story, full width.
+    y = 202
+    kick_font = load(SANS_BOLD, 16)
+    draw.text((WIDTH // 2, y), LEAD_KICKER, font=kick_font, fill=INK,
+              anchor="ma")
+    y += 24
+    lead_head_font = load(SERIF_BOLD, 42)
+    y = draw_lines(draw, 92, y, LEAD_HEADLINE, lead_head_font, 840, 50,
+                   align="center")
+    y += 6
+    lead_body_font = load(SERIF, 19)
+    y = draw_lines(draw, 92, y, LEAD_BODY, lead_body_font, 840, 26)
+    y += 12
+    rule(draw, MARGIN, CONTENT_RIGHT, y)
+    grid_top = y + 14
 
+    # Two-column grid for the other five stories.
+    col_w = 456
+    left_x = MARGIN
+    right_x = WIDTH - MARGIN - col_w
 
-def pic_coins(draw, cx, cy, s, color=INK):
-    """Stacked coins with a euro sign: a loan package."""
-    for i, dy in enumerate((10, 0, -10)):
-        y = cy + dy
-        draw.ellipse([cx - s + 6, y - 7, cx + s - 6, y + 7], fill=color)
-        draw.ellipse([cx - s + 6, y - 7, cx + s - 6, y + 7],
-                     outline=PAPER, width=1)
-    draw.text((cx - 7, cy - 24), "€", font=sans_bold(22), fill=PAPER)
+    left_y = grid_top
+    for i, (kicker, headline, body) in enumerate(GRID_STORIES_LEFT):
+        if i:
+            left_y += 12
+            rule(draw, left_x, left_x + col_w, left_y)
+            left_y += 12
+        left_y = draw_story(draw, left_x, left_y, col_w,
+                            kicker, headline, body)
 
+    # Classic end mark under the shorter left column.
+    end_font = load(SERIF_BOLD, 16)
+    draw.text((left_x + col_w // 2, left_y + 18), "— 30 —",
+              font=end_font, fill=INK, anchor="ma")
 
-def draw_hero_band(draw, x0, x1, y0, y1):
-    """Skyline, sun and three small flags — PIL shapes only, no text."""
-    draw.rectangle([x0, y0, x1, y1], fill=SKY_TOP)
-    bands = 12
-    for i in range(bands):
-        t = i / bands
-        r = int(SKY_TOP[0] + (SKY_BOT[0] - SKY_TOP[0]) * t)
-        g = int(SKY_TOP[1] + (SKY_BOT[1] - SKY_TOP[1]) * t)
-        b = int(SKY_TOP[2] + (SKY_BOT[2] - SKY_TOP[2]) * t)
-        yy = y0 + int((y1 - y0) * i / bands)
-        draw.rectangle([x0, yy, x1, yy + int((y1 - y0) / bands) + 1], fill=(r, g, b))
-    sun_cx, sun_cy, sun_r = x1 - 110, y0 + 34, 26
-    draw.ellipse([sun_cx - sun_r, sun_cy - sun_r, sun_cx + sun_r, sun_cy + sun_r],
-                 fill=SUN)
-    for ang in range(0, 360, 45):
-        a = math.radians(ang)
-        draw.line([(sun_cx + (sun_r + 4) * math.cos(a), sun_cy + (sun_r + 4) * math.sin(a)),
-                   (sun_cx + (sun_r + 14) * math.cos(a), sun_cy + (sun_r + 14) * math.sin(a))],
-                  fill=SUN, width=3)
-    # Skyline silhouettes along the bottom of the band.
-    buildings = [(0, 52, 96), (70, 34, 74), (150, 62, 110), (230, 40, 88),
-                 (320, 56, 120), (440, 36, 70), (510, 66, 104), (610, 44, 92),
-                 (700, 58, 116), (800, 38, 80), (880, 54, 72)]
-    for bx, bw, bh in buildings:
-        draw.rectangle([x0 + bx, y1 - bh, x0 + bx + bw, y1], fill=(24, 38, 54))
-    # Three small flags on poles above the skyline.
-    flag_cols = [(178, 34, 34), (34, 102, 52), (24, 68, 140)]
-    for i, col in enumerate(flag_cols):
-        px = x0 + 130 + i * 300
-        draw.line([(px, y1 - 118), (px, y1 - 62)], fill=(24, 38, 54), width=3)
-        draw.rectangle([px, y1 - 118, px + 56, y1 - 96], fill=col)
-        draw.rectangle([px, y1 - 96, px + 56, y1 - 88], fill=PAPER)
-    draw.rectangle([x0, y0, x1, y1], outline=INK, width=2)
+    right_y = grid_top
+    for i, (kicker, headline, body) in enumerate(GRID_STORIES_RIGHT):
+        if i:
+            right_y += 12
+            rule(draw, right_x, right_x + col_w, right_y)
+            right_y += 12
+        right_y = draw_story(draw, right_x, right_y, col_w,
+                             kicker, headline, body)
+
+    # Vertical divider between the columns.
+    bottom = max(left_y, right_y)
+    draw.line([(512, grid_top), (512, bottom)], fill=INK, width=1)
+
+    # Footer.
+    rule(draw, MARGIN, CONTENT_RIGHT, 984)
+    foot_font = load(SANS, 13)
+    draw.text((WIDTH // 2, 992),
+              "THE WORLD  •  THURSDAY 19 NOVEMBER 2026  •  "
+              "DRAWN ENTIRELY WITH PYTHON & PIL",
+              font=foot_font, fill=INK, anchor="ma")
+
+    print("grid_top:", grid_top)
+    print("left column bottom:", left_y)
+    print("right column bottom:", right_y)
+    if bottom > FIT_LIMIT:
+        print("WARNING: content bottom", bottom, "exceeds fit limit",
+              FIT_LIMIT)
+    return img
 
 
 def main():
-    img = Image.new("RGB", (W, H), PAPER)
-    draw = ImageDraw.Draw(img)
-    mx = 36
-    cx = W // 2
-
-    # Masthead.
-    draw_centered(draw, cx, 22, "THE WORLD", serif_black(86))
-    hrule(draw, mx, W - mx, 122, 2)
-    draw_centered(draw, cx, 130, "THURSDAY, 19 NOVEMBER 2026", sans_bold(19))
-    hrule(draw, mx, W - mx, 162, 3)
-    hrule(draw, mx, W - mx, 167, 1)
-
-    # Lead story.
-    draw_centered(draw, cx, 178, "APEC SUMMIT IN SHENZHEN", sans_bold(17), fill=ACCENT)
-    draw_centered(draw, cx, 202, "TRUMP, XI AND PUTIN MEET", serif_bold(52))
-    lead_deck = ("Trilateral talks in Shenzhen on Thursday 19 Nov, on the "
-                 "sidelines of APEC; Trump, Xi and Putin meet as APEC "
-                 "leaders gather in China.")
-    _, lead_lines = draw_wrapped_centered(draw, cx, 268, lead_deck, sans(19), 940)
-    assert len(lead_lines) <= 2, lead_lines
-
-    # Hero band.
-    draw_hero_band(draw, mx, W - mx, 322, 442)
-    hrule(draw, mx, W - mx, 460, 2)
-
-    # Row 2: two stories.
-    row2_y = 474
-    col_w2 = 452
-    stories2 = [
-        ("GAMING", "GTA VI ROLLS OUT WORLDWIDE",
-         "After a 13-year wait, Grand Theft Auto VI begins its global "
-         "rollout, returning players to Vice City.", pic_controller),
-        ("UNITED STATES", "JEFFRIES NOMINATED SPEAKER",
-         "Democrats nominate Hakeem Jeffries for Speaker of the House, "
-         "the first Black American to hold the post.", pic_dome),
-    ]
-    for i, (kicker, headline, deck, pic) in enumerate(stories2):
-        x0 = mx + i * (col_w2 + 24)
-        ccx = x0 + col_w2 // 2
-        draw_centered(draw, ccx, row2_y, kicker, sans_bold(15), fill=ACCENT)
-        y = row2_y + 24
-        y, hl = draw_wrapped_centered(draw, ccx, y, headline, serif_bold(29),
-                                       col_w2, leading=34)
-        assert len(hl) <= 2, hl
-        y, dl = draw_wrapped_centered(draw, ccx, y + 4, deck, sans(17),
-                                       col_w2, leading=21)
-        assert len(dl) <= 2, dl
-        pic(draw, ccx, 638, 20)
-    draw.line([(512, 474), (512, 648)], fill=GREY, width=1)
-    hrule(draw, mx, W - mx, 664, 2)
-
-    # Row 3: three stories.
-    row3_y = 678
-    col_w3 = 296
-    stories3 = [
-        ("WEATHER", "CYCLONE AKVAN NEARS LANDFALL",
-         "Severe storm in the Bay of Bengal; landfall due 20 Nov, "
-         "winds 120-130 km/h.", pic_spiral),
-        ("SPACE", "VOYAGER 1, ONE LIGHT-DAY OUT",
-         "After almost 50 years in space, NASA's Voyager 1 reaches "
-         "one light-day from Earth.", pic_signal),
-        ("EUROPE", "EU PLANS €45BN UKRAINE LOAN",
-         "Brussels proposes a €45bn loan for Kyiv, to be repaid after "
-         "Russia pays war reparations.", pic_coins),
-    ]
-    for i, (kicker, headline, deck, pic) in enumerate(stories3):
-        x0 = mx + i * (col_w3 + 16)
-        ccx = x0 + col_w3 // 2
-        draw_centered(draw, ccx, row3_y, kicker, sans_bold(14), fill=ACCENT)
-        y = row3_y + 22
-        y, hl = draw_wrapped_centered(draw, ccx, y, headline, serif_bold(25),
-                                       col_w3, leading=29)
-        assert len(hl) <= 2, hl
-        y, dl = draw_wrapped_centered(draw, ccx, y + 4, deck, sans(15),
-                                       col_w3, leading=19)
-        assert len(dl) <= 2, dl
-        pic(draw, ccx, 912, 24)
-    draw.line([(348, 678), (348, 946)], fill=GREY, width=1)
-    draw.line([(676, 678), (676, 946)], fill=GREY, width=1)
-
-    # Footer.
-    hrule(draw, mx, W - mx, 960, 2)
-    draw_centered(draw, cx, 972, "THURSDAY, 19 NOVEMBER 2026 — THE DAY IN SIX STORIES",
-                  sans_bold(16))
-
-    out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "entry.png")
-    img.save(out, "PNG", optimize=True)
-    print("wrote", out, img.size, img.mode)
+    img = build()
+    out = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                       "entry.png")
+    img.save(out)
+    print("wrote", out)
 
 
 if __name__ == "__main__":
